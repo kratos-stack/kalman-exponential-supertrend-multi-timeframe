@@ -1,0 +1,131 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © MisinkoMaster
+// Multi-Timeframe Enhancement
+
+//@version=6
+indicator("Kalman Exponential SuperTrend MTF", "KEST MTF | MisinkoMaster", overlay = true)
+///////////////////////////////////////////////////////////////////////////////
+//Get User Defined Inputs
+// Multi-Timeframe Settings
+useMultiTimeframe = input.bool(false, title = "Enable Multi-Timeframe", group = "Multi-Timeframe Settings")
+mtfResolution = input.timeframe("", title = "Timeframe", group = "Multi-Timeframe Settings")
+
+len = input.int(13, title = "ATR Length", group = "SuperTrend | MisinkoMaster",
+      minval = 2, step = 1)
+mul = input.float(defval = 1.75, title = "Factor", group = "SuperTrend | MisinkoMaster",
+      minval = 0.01, step = 0.01)
+pricesource = input.source(close, "Kalman Price Source", group = "Kalman Filter | MisinkoMaster")
+processNoise = input.float(0.01, title="Process Noise", step = 0.001, group = "Kalman Filter | MisinkoMaster")
+measurementNoise = input.float(3.0, title="Measurement Noise", group = "Kalman Filter | MisinkoMaster", step = 0.1)
+N = input.int(5, title="Filter Order", minval=1, group = "Kalman Filter | MisinkoMaster", step = 1)
+//Plot Input (Removable)
+style = input.string(defval = "Dragonic", title = "Plotting Style",
+     options = ["Dragonic", "Medieval", "Modern", "Retro", "Futuristic", "Tropical", "OG"],
+     group = "Style Settings")
+///////////////////////////////////////////////////////////////////////////////
+//Calculations
+src = pricesource
+
+//Kalman Filter
+var float[] stateEstimate = array.new_float(N, na)
+var float[] errorCovariance = array.new_float(N, 100.0)
+
+f_init(series float pricesource) =>
+    if na(array.get(stateEstimate, 0))
+        for i = 0 to N-1
+            array.set(stateEstimate, i, pricesource)
+            array.set(errorCovariance, i, 1.0)
+
+f_kalman(series float pricesource) =>
+    predictedStateEstimate = array.new_float(N)
+    predictedErrorCovariance = array.new_float(N)
+    for i = 0 to N-1
+        array.set(predictedStateEstimate, i, array.get(stateEstimate, i))
+        array.set(predictedErrorCovariance, i, array.get(errorCovariance, i) + processNoise)    
+    kalmanGain = array.new_float(N)
+    for i = 0 to N-1
+        kg = array.get(predictedErrorCovariance, i) / (array.get(predictedErrorCovariance, i) + measurementNoise)
+        array.set(kalmanGain, i, kg)
+        array.set(stateEstimate, i, array.get(predictedStateEstimate, i) + kg * (pricesource - array.get(predictedStateEstimate, i)))
+        array.set(errorCovariance, i, (1 - kg) * array.get(predictedErrorCovariance, i))
+    array.get(stateEstimate, 0)
+
+f_init(pricesource)
+kalmanFilteredPrice = f_kalman(pricesource)
+
+//Exponential SuperTrend
+a = 2/(1+len)
+atr = ta.atr(len)
+UpperBand = kalmanFilteredPrice + atr*mul
+LowerBand = kalmanFilteredPrice - atr*mul
+
+Upper = UpperBand[1]*(1-a)+UpperBand*a
+Lower = LowerBand[1]*(1-a)+LowerBand*a
+
+///////////////////////////////////////////////////////////////////////////////
+//Trend Logic
+var trend = 0
+
+L = ta.crossover(src, Upper)
+S = ta.crossunder(src, Lower)
+
+if L and not S
+    trend := 1
+if S
+    trend := -1
+
+///////////////////////////////////////////////////////////////////////////////
+// Multi-Timeframe Logic
+mtf_Upper = useMultiTimeframe and mtfResolution != "" ? request.security(syminfo.tickerid, mtfResolution, Upper, gaps = barmerge.gaps_off) : Upper
+mtf_Lower = useMultiTimeframe and mtfResolution != "" ? request.security(syminfo.tickerid, mtfResolution, Lower, gaps = barmerge.gaps_off) : Lower
+mtf_trend = useMultiTimeframe and mtfResolution != "" ? request.security(syminfo.tickerid, mtfResolution, trend, gaps = barmerge.gaps_off) : trend
+
+///////////////////////////////////////////////////////////////////////////////
+//Plotting
+bullcol = switch style
+    "Dragonic" => color.rgb(0, 255, 155, 10)
+    "Medieval" => color.rgb(200, 255, 255, 10)
+    "Modern" => color.rgb(0, 255, 255, 10)
+    "Retro" => color.rgb(103, 194, 203)
+    "Futuristic" => color.rgb(16, 255, 215)
+    "Tropical" => color.rgb(251, 255, 14)
+    "OG" => color.rgb(0, 255, 0)
+bearcol = switch style
+    "Dragonic" => color.rgb(255, 0, 155, 10)
+    "Medieval" => color.rgb(24, 2, 3, 10)
+    "Modern" => color.rgb(255, 0, 255, 10)
+    "Retro" => color.rgb(212, 175, 55)
+    "Futuristic" => color.rgb(255, 72, 72)
+    "Tropical" => color.rgb(243, 142, 11)
+    "OG" => color.rgb(255, 0, 0)
+bullcolT = switch style
+    "Dragonic" => color.rgb(0, 255, 155, 60)
+    "Medieval" => color.rgb(200, 255, 255, 60)
+    "Modern" => color.rgb(0, 255, 255, 60)
+    "Retro" => color.rgb(103, 194, 203, 60)
+    "Futuristic" => color.rgb(16, 255, 215, 60)
+    "Tropical" => color.rgb(251, 255, 14, 45)
+    "OG" => color.rgb(0, 255, 0, 60)
+bearcolT = switch style
+    "Dragonic" => color.rgb(255, 0, 155, 60)
+    "Medieval" => color.rgb(24, 2, 3, 60)
+    "Modern" => color.rgb(255, 0, 255, 60)
+    "Retro" => color.rgb(212, 175, 55, 60)
+    "Futuristic" => color.rgb(255, 72, 72, 60)
+    "Tropical" => color.rgb(243, 142, 11, 45)
+    "OG" => color.rgb(255, 0, 0, 60)
+
+var col = color.rgb(255, 255, 255, 100)
+var colT = color.rgb(255, 255, 255, 100)
+if mtf_trend == 1
+    col := bullcol
+    colT := bullcolT
+if mtf_trend == -1
+    col := bearcol
+    colT := bearcolT
+
+ap = plot(src, color = colT)
+lp = plot(mtf_trend == 1 ? mtf_Lower : na, title = "Lower Band", color = col, linewidth = 2, style = plot.style_linebr)
+up = plot(mtf_trend == -1 ? mtf_Upper : na, title = "Upper Band", color = col, linewidth = 2, style = plot.style_linebr)
+fill(lp, ap, color = colT, fillgaps = false)
+fill(up, ap, color = colT, fillgaps = false)
